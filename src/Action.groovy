@@ -60,7 +60,7 @@ class SubtitlesCrawler {
 
     static class Builder {
 
-        final String videoSuffix = "mkv,flv,mp4,rmvb";
+        final String videoSuffix = "*.avi,rmvb,rm,asf,divx,mpg,mpeg,mpe,wmv,mp4,mkv,vob";
 
         private SubtitlesCrawler subtitlesCrawler;
 
