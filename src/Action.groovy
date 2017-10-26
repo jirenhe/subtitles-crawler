@@ -22,7 +22,7 @@ def rootDir = "E://temp/";
 println("start");
 
 @Field boolean debugAble = false;
-@Field boolean isNameEqualFile = true;
+@Field boolean isNameEqualFile = false;
 
 
 File file = new File(rootDir);
