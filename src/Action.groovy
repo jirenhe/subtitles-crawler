@@ -1,3 +1,4 @@
+import groovy.transform.Field
 import org.apache.http.*
 import org.apache.http.client.HttpClient
 import org.apache.http.client.methods.HttpGet
@@ -16,105 +17,207 @@ import org.jsoup.select.Elements
  * Time 2017/10/24.
  * Version v1.0
  */
-def keyWord = "明日边缘";
+
+def rootDir = "E://temp/";
 println("start");
 
-def subtitlesCrawler = new SubtitlesCrawler();
-subtitlesCrawler.with {
-    debugAble = false
+@Field boolean debugAble = false;
+@Field boolean isNameEqualFile = true;
+
+
+File file = new File(rootDir);
+recursionDir(file);
+
+def recursionDir(File file) {
+    File[] files = file.listFiles();
+    files.each {
+        item ->
+            if (item.isDirectory()) {
+                recursionDir(item);
+            } else {
+                new Thread({
+                    try {
+                        new SubtitlesCrawler.Builder(item).debugAble(debugAble).
+                                isNameEqualFile(isNameEqualFile).build().downloadSubtitles();
+                    } catch (ignore) {
+                    }
+                }).start();
+            }
+    }
 }
-subtitlesCrawler.downloadSubtitles(keyWord, "E://temp/");
 
 class SubtitlesCrawler {
 
-    def urlRoot = "http://www.zimuku.net";
-    def debugAble = true;
+    final String urlRoot = "http://www.zimuku.net";
+    boolean debugAble = false;
+    boolean isNameEqualFile = true;
+    String fileDir;
+    String actuallyFileName;
+    String fullFileName;
+    File targetFile;
 
+    private SubtitlesCrawler() {}
 
-    def downloadSubtitles(String keyWord, String fileDir) {
-        def subtitlesInfo = this.matchSubtitlesInfo(keyWord);
-        if (subtitlesInfo) {
-            subtitlesInfo.forEach({
-                item ->
-                    new Thread({ download(item.href, item.title, fileDir); }).start();
-            });
+    static class Builder {
+
+        final String videoSuffix = "mkv,flv,mp4,rmvb";
+
+        private SubtitlesCrawler subtitlesCrawler;
+
+        Builder(String fileDir, String fullFileName) {
+            subtitlesCrawler = new SubtitlesCrawler();
+            subtitlesCrawler.fileDir = fileDir;
+            subtitlesCrawler.fullFileName = fullFileName;
+        }
+
+        Builder(File targetFile) {
+            subtitlesCrawler = new SubtitlesCrawler();
+            subtitlesCrawler.targetFile = targetFile;
+        }
+
+        Builder debugAble(boolean debugAble) {
+            subtitlesCrawler.debugAble = debugAble;
+            return this;
+        }
+
+        Builder isNameEqualFile(boolean isNameEqualFile) {
+            subtitlesCrawler.isNameEqualFile = isNameEqualFile;
+            return this;
+        }
+
+        SubtitlesCrawler build() {
+            if (subtitlesCrawler.targetFile) {
+                if (!subtitlesCrawler.targetFile.exists()) throw new FileNotFoundException();
+                subtitlesCrawler.fullFileName = subtitlesCrawler.targetFile.getName();
+                subtitlesCrawler.fileDir = subtitlesCrawler.targetFile.getParentFile().getAbsolutePath() + "\\";
+            } else {
+                subtitlesCrawler.targetFile = new File(subtitlesCrawler.fileDir + subtitlesCrawler.fullFileName);
+                if (!subtitlesCrawler.targetFile.exists()) throw new FileNotFoundException();
+            }
+            int lastIndexOf = subtitlesCrawler.fullFileName.lastIndexOf(".");
+            assert lastIndexOf != -1;
+            subtitlesCrawler.actuallyFileName = subtitlesCrawler.fullFileName.substring(0, lastIndexOf);
+            String suffix = subtitlesCrawler.fullFileName.substring(lastIndexOf + 1, subtitlesCrawler.fullFileName.length());
+            assert videoSuffix.contains(suffix);
+            return subtitlesCrawler;
         }
     }
 
-    def matchSubtitlesInfo(keyWord) {
+    def downloadSubtitles() {
+        println("start match subtitles for ${fileDir}${actuallyFileName}");
+        def subtitlesInfo = matchSubtitlesInfo();
+        if (subtitlesInfo) {
+            for (int i = 0; i < subtitlesInfo.size(); i++) {
+                final def item = subtitlesInfo.get(i);
+                final def index = i;
+                new Thread({
+                    download(item.href, index);
+                }).start();
+            }
+        }
+    }
+
+    private def matchSubtitlesInfo() {
         def list = [];
-        Document document = Jsoup.connect("${urlRoot}/search?q=${keyWord}").get();
+        Document document = Jsoup.connect("${urlRoot}/search?q=${actuallyFileName}").get();
         debugAble && (println(document));
         Elements elements = document.getElementsByClass("sublist");
         if (elements) {
-            Elements trs = elements.get(0).getElementsByTag("tr");
-            if (trs) {
-                Elements temp;
-                Element a;
-                trs.forEach({
-                    temp = it.getElementsByClass("rating-star");
-                    if (temp && temp.get(0).hasClass("allstar50")) {
-                        temp = it.getElementsByClass("first");
-                        if (temp) {
-                            a = temp.get(0).getElementsByTag("a").get(0);
-                            String href = a.attr("href");
-                            String title = a.attr("title");
-                            list.add(["href": href, "title": title]);
-                            println("title : ${title} href : ${href}");
-                        }
+            elements.forEach({
+                item ->
+                    Elements trs = item.getElementsByTag("tr");
+                    if (trs) {
+                        Elements temp;
+                        Element a;
+                        trs.forEach({
+                            temp = it.getElementsByClass("rating-star");
+                            if (temp && temp.get(0).hasClass("allstar50")) {
+                                temp = it.getElementsByClass("first");
+                                if (temp) {
+                                    a = temp.get(0).getElementsByTag("a").get(0);
+                                    String href = a.attr("href");
+                                    String title = a.attr("title");
+                                    list.add(["href": href, "title": title]);
+                                }
+                            }
+                        });
                     }
-                });
-            }
+            });
         }
         return list;
     }
 
-    def download(String href, String title, String fileDir) {
+    private def download(String href, final int index) {
         Document document = Jsoup.connect("${urlRoot}${href}").get();
         debugAble && println(document);
         Elements elements = document.getElementsByClass("dlsub");
         if (elements) {
             Element downloadATag = elements.get(0).getElementById("down1");
             String downloadUrl = downloadATag.attr("href");
-            this.download("${urlRoot}${downloadUrl}", fileDir);
-            try {
-                HttpClient client = HttpClientBuilder.newInstance().build();
-                HttpGet get = new HttpGet("${urlRoot}${downloadUrl}");
-                HttpResponse response = client.execute(get);
+            downloadFile("${urlRoot}${downloadUrl}", index);
+        }
+    }
 
-                HttpEntity entity = response.getEntity();
-                InputStream is = entity.getContent();
-                Header contentHeader = response.getFirstHeader("Content-Disposition");
-                String filename = null;
-                if (contentHeader) {
-                    HeaderElement[] values = contentHeader.getElements();
-                    if (values.length == 1) {
-                        NameValuePair param = values[0].getParameterByName("filename");
-                        if (param != null) {
-                            filename = param.getValue();
+    private def downloadFile(String url, final int index) {
+        InputStream is;
+        HttpClient client;
+        FileOutputStream fileOut;
+        try {
+            client = HttpClientBuilder.create().build();
+            HttpGet get = new HttpGet(url);
+            HttpResponse response = client.execute(get);
+            HttpEntity entity = response.getEntity();
+            is = entity.getContent();
+            String fileName = this.getDownLoadFileName(response, index);
+            def filepath = "${fileDir}${fileName}";
+            File file = new File(filepath);
+            if (file.exists()) {
+                println("${filepath} is already exist, so skip it");
+                return;
+            }
+            println("${filepath} downloading ... ");
+            fileOut = new FileOutputStream(file);
+            byte[] buffer = new byte[1024];
+            int ch = 0;
+            while ((ch = is.read(buffer)) != -1) {
+                fileOut.write(buffer, 0, ch);
+            }
+            fileOut.flush();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            is && (is.close());
+            fileOut && (fileOut.close());
+            client && (client.close());
+        }
+    }
+
+    private def getDownLoadFileName(HttpResponse response, final int index) {
+        Header contentHeader = response.getFirstHeader("Content-Disposition");
+        String singleFileName = null;
+        if (contentHeader) {
+            HeaderElement[] values = contentHeader.getElements();
+            if (values.length == 1) {
+                NameValuePair param = values[0].getParameterByName("filename");
+                if (param != null) {
+                    String remoteFileName = param.getValue();
+                    singleFileName = remoteFileName;
+                    if (isNameEqualFile) {
+                        def indexOf = singleFileName.lastIndexOf(".");
+                        if (singleFileName.contains(".")) {
+                            def indexName = "";
+                            if (index) {
+                                indexName = "(${index})";
+                            }
+                            String suffix = singleFileName.substring(indexOf, singleFileName.length());
+                            singleFileName = this.actuallyFileName + indexName + suffix;
                         }
                     }
+                    println("index : ${index} remote file is : ${remoteFileName} actuallyFileName is : ${singleFileName}")
                 }
-                def filepath = "${fileDir}${filename}";
-                println("${filepath} downloading ... ");
-                File file = new File(filepath);
-                file.getParentFile().mkdirs();
-                FileOutputStream fileOut = new FileOutputStream(file);
-                /**
-                 * 根据实际运行效果 设置缓冲区大小
-                 */
-                byte[] buffer = new byte[1024];
-                int ch = 0;
-                while ((ch = is.read(buffer)) != -1) {
-                    fileOut.write(buffer, 0, ch);
-                }
-                is.close();
-                fileOut.flush();
-                fileOut.close();
-
-            } catch (Exception e) {
-                e.printStackTrace();
             }
         }
+        return singleFileName;
     }
 }
