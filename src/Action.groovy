@@ -22,6 +22,7 @@ import java.util.concurrent.Semaphore
  * Version v1.0
  */
 
+//def rootDir = "I:\\temp\\";
 def rootDir = "\\\\192.168.31.1\\XiaoMi-usb0\\下载\\";
 println("start");
 
@@ -30,9 +31,22 @@ println("start");
 @Field final Semaphore semaphore = new Semaphore(3);
 @Field final String videoSuffix = "avi,rmvb,rm,asf,divx,mpg,mpeg,mpe,wmv,mp4,mkv,vob";
 @Field final String[] exclusionWords = [".DOCU", ".EXTENDED", ".com"];
+@Field List<String> allFail = [];
 
 File file = new File(rootDir);
 recursionDir(file);
+executor.shutdown();
+
+while(true){
+    if(executor.isTerminated()){
+        printf("----------all fail------------");
+        for (String failRecord : allFail){
+            printf(failRecord);
+        }
+        break;
+    }
+    Thread.sleep(5000);
+}
 
 def recursionDir(File file) {
     File[] files = file.listFiles();
@@ -52,6 +66,7 @@ def recursionDir(File file) {
                             crawler?.downloadSubtitles();
                         } catch (any) {
                             any.printStackTrace();
+                            allFail.add(fileDir + keyWord);
                         } finally {
                             semaphore.release();
                         }
@@ -103,11 +118,7 @@ class SubtitlesCrawler {
             for (int i = 0; i < subtitlesInfo.size(); i++) {
                 final def item = subtitlesInfo.get(i);
                 final def index = i;
-                try {
-                    download(item.href, index);
-                } catch (any) {
-                    println("down load from ${item.href} fail! error:${any.getMessage()}");
-                }
+                download(item.href, index);
             }
         } else {
             println("${fileDir} subtitles not found");
@@ -144,7 +155,7 @@ class SubtitlesCrawler {
                 });
             }
         } catch (any) {
-            println("${fileDir}${keyWord} match subtitles fail! exception:${any.getMessage()} url:${url}");
+            throw new Exception("${fileDir}${keyWord} match subtitles fail! exception:${any.getMessage()} url:${url}");
         }
         return list;
     }
